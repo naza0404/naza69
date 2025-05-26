@@ -1,0 +1,182 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8">
+  <title>Platforma Załadunku i Rozładunku</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css" />
+  <style>
+    body { font-family: Arial, sans-serif; margin-bottom: 50px; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 10px;
+    }
+    th, td {
+      border: 1px solid #ccc;
+      padding: 6px;
+      text-align: center;
+    }
+    .pilne { background-color: #ffe6e6; }
+    .status-aktualne { background-color: #a5f3a1 !important; font-weight: bold; }
+    .status-nieaktualne { background-color: #f9a1a1 !important; font-weight: bold; }
+    .status-nieznane { background-color: #fff7a1 !important; font-weight: bold; }
+    .date-time-group input { width: 45%; display: inline-block; margin: 2px 1%; }
+    textarea { width: 100%; height: 60px; resize: vertical; }
+    input[list] { width: 100%; }
+    #map { height: 400px; margin-top: 20px; }
+    #zakazy {
+      background: #fff3cd;
+      border: 1px solid #ffeeba;
+      padding: 10px;
+      margin: 10px 0;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>Platforma Załadunku i Rozładunku</h1>
+  <div id="zakazy">
+    <strong>🚫 Zakazy ruchu dla ciężarówek (przykład):</strong><br>
+    - Niedziele i święta: 8:00–22:00<br>
+    - Piątki w wakacje: 18:00–22:00<br>
+    - Soboty w wakacje: 8:00–14:00<br>
+    - Niemcy: codziennie > 7.5t: zakaz nocny 22:00–6:00 w miastach
+  </div>
+  <button onclick="dodajWiersz()">➕ Dodaj nowy wiersz</button>
+  <button onclick="sortujTabele()">↕ Sortuj według daty</button>
+  <button onclick="pokazTrase()">📍 Pokaż trasę</button>
+
+  <datalist id="lokalizacje"></datalist>
+
+  <table id="tabela">
+    <thead>
+      <tr>
+        <th>PILNE</th>
+        <th>Załadunek</th>
+        <th>Data załadunku (od-do)</th>
+        <th>Godzina załadunku (od-do)</th>
+        <th>Rozładunek</th>
+        <th>Data rozładunku (od-do)</th>
+        <th>Godzina rozładunku (od-do)</th>
+        <th>Sposób załadunku</th>
+        <th>Potwierdź aktualność</th>
+        <th>Uwagi</th>
+        <th>Kilometry</th>
+        <th>Stawka</th>
+        <th>zł/km</th>
+        <th>Akcje</th>
+      </tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+
+  <div id="map"></div>
+
+  <script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js"></script>
+  <script>
+    const tabela = document.querySelector("#tabela tbody");
+
+    function dodajWiersz() {
+      const wiersz = document.createElement("tr");
+      wiersz.classList.add("pilne");
+      wiersz.innerHTML = `
+        <td><input type="checkbox" checked onclick="togglePilne(this)"></td>
+        <td><input type="text" list="lokalizacje" placeholder="Miasto (kod)"></td>
+        <td class="date-time-group"><input type="date"> <input type="date"></td>
+        <td class="date-time-group"><input type="time"> <input type="time"></td>
+        <td><input type="text" list="lokalizacje" placeholder="Miasto (kod)"></td>
+        <td class="date-time-group"><input type="date"> <input type="date"></td>
+        <td class="date-time-group"><input type="time"> <input type="time"></td>
+        <td><select><option value="tyłem">Tyłem</option><option value="bokiem">Bokiem</option><option value="górą">Górą</option><option value="bok_góra">Bok + Góra</option><option value="auto_winda">Auto z windą</option><option value="inne">Inne</option></select></td>
+        <td><select onchange="zmienAktualnosc(this)"><option value="">-- wybierz --</option><option value="aktualne">Aktualne</option><option value="nieaktualne">Nieaktualne</option><option value="nieznane">???</option></select></td>
+        <td><textarea placeholder="Uwagi"></textarea></td>
+        <td class="km-cell">0 km</td>
+        <td><input type="text" placeholder="Stawka" oninput="przeliczStawke(this)"></td>
+        <td class="zl-km-cell">0.00</td>
+        <td><button onclick="usunWiersz(this)">❌ Usuń</button></td>
+      `;
+      tabela.appendChild(wiersz);
+    }
+
+    function przeliczStawke(input) {
+      const row = input.closest("tr");
+      const kmCell = row.querySelector(".km-cell");
+      const zlKmCell = row.querySelector(".zl-km-cell");
+      const km = parseFloat(kmCell.textContent.replace(' km', '').replace(',', '.'));
+      const stawka = parseFloat(input.value.replace(',', '.'));
+      zlKmCell.textContent = (!isNaN(km) && !isNaN(stawka) && km > 0) ? (stawka / km).toFixed(2) : '0.00';
+    }
+
+    function usunWiersz(btn) {
+      if (confirm("Czy na pewno chcesz usunąć ten wiersz?")) {
+        btn.closest("tr").remove();
+      }
+    }
+
+    function zmienAktualnosc(select) {
+      const td = select.parentNode;
+      td.classList.remove("status-aktualne", "status-nieaktualne", "status-nieznane");
+      td.classList.add("status-" + select.value);
+    }
+
+    function togglePilne(checkbox) {
+      const row = checkbox.closest("tr");
+      row.classList.toggle("pilne", checkbox.checked);
+      tabela.removeChild(row);
+      checkbox.checked ? tabela.prepend(row) : tabela.appendChild(row);
+    }
+
+    function sortujTabele() {
+      const rows = Array.from(tabela.rows);
+      rows.sort((a, b) => new Date(a.cells[2].querySelector("input").value) - new Date(b.cells[2].querySelector("input").value));
+      rows.forEach(row => tabela.appendChild(row));
+    }
+
+    fetch('kodypolska.json')
+      .then(r => r.ok ? r.json() : Promise.reject("Nie udało się załadować JSON"))
+      .then(data => {
+        const datalist = document.getElementById("lokalizacje");
+        data.forEach(entry => {
+          const option = document.createElement("option");
+          option.value = `${entry.place_name} (${entry.postal_code})`;
+          datalist.appendChild(option);
+        });
+      });
+
+    const map = L.map('map').setView([52.1, 19.4], 6);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      attribution: '&copy; OpenStreetMap'
+    }).addTo(map);
+    let routeLayer;
+
+    function extractCity(val) {
+      return val.includes('(') ? val.split('(')[0].trim() : val;
+    }
+
+    async function pokazTrase() {
+      const row = tabela.querySelector("tr");
+      if (!row) return alert("Dodaj wiersz z lokalizacjami!");
+      const start = extractCity(row.cells[1].querySelector("input").value);
+      const end = extractCity(row.cells[4].querySelector("input").value);
+      const getCoords = async (query) => {
+        const response = await fetch(\`https://nominatim.openstreetmap.org/search?format=json&q=\${encodeURIComponent(query)}\`);
+        const data = await response.json();
+        return data.length > 0 ? [parseFloat(data[0].lat), parseFloat(data[0].lon)] : null;
+      };
+      const startCoords = await getCoords(start);
+      const endCoords = await getCoords(end);
+      if (!startCoords || !endCoords) return alert("Nie znaleziono lokalizacji!");
+      const url = \`https://router.project-osrm.org/route/v1/driving/\${startCoords[1]},\${startCoords[0]};\${endCoords[1]},\${endCoords[0]}?overview=full&geometries=geojson\`;
+      const routeData = await fetch(url).then(r => r.json());
+      if (routeLayer) map.removeLayer(routeLayer);
+      routeLayer = L.geoJSON(routeData.routes[0].geometry).addTo(map);
+      map.fitBounds(routeLayer.getBounds());
+      const distanceKm = (routeData.routes[0].distance / 1000).toFixed(2);
+      row.querySelector(".km-cell").textContent = \`\${distanceKm} km\`;
+      const stawkaInput = row.cells[11].querySelector("input");
+      if (stawkaInput) przeliczStawke(stawkaInput);
+    }
+  </script>
+
+</body>
+</html>
